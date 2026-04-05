@@ -1,0 +1,50 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/extract_course_reqs"]
+
+[project]
+name = "extract-course-reqs"
+version = "0.1.0"
+description = "Extracts course requirements from the SFU Calendar"
+readme = "README.md"
+authors = [
+    { name = "Nick Sumner", email = "nick.sumner@gmail.com" }
+]
+requires-python = ">=3.14"
+dependencies = [
+    "beautifulsoup4>=4.14.3",
+    "requests>=2.33.1",
+]
+
+[project.scripts]
+extract-course-reqs = "extract_course_reqs.extract_course_reqs:main"
+
+[dependency-groups]
+dev = [
+    "mypy>=1.20.0",
+    "pytest>=8.0",
+    "ruff>=0.15.9",
+    "types-requests>=2.33.0.20260402",
+]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py314"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+ignore = ["RSE102"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["E501"]
+
+[tool.mypy]
+strict = true
+python_version = "3.14"
