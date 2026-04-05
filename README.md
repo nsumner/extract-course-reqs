@@ -55,7 +55,7 @@ uv run extract-course-reqs --extract-calendar --year 2021 --output some/other/pa
 
 ### Output Structure
 
-The `cmpt_dependencies.json` file contains an array of course objects with:
+The `cmpt-dependencies.json` file contains an array of course objects with:
 
 - `course`: Course code (e.g., `"CMPT 125"`)
 - `title`: Course title
@@ -63,6 +63,17 @@ The `cmpt_dependencies.json` file contains an array of course objects with:
 - `coreqs`: DNF list of corequisite courses
 - `antireqs`: List of antirequisite courses
 - `noncourse`: Non-course-related requirements (e.g., "minimum grade of C-")
+
+
+The format is queryable using tools like `jq`, so if you want to
+(1) find all courses with antirequisites and
+(2) print out the course code and antirequisites for those courses, you can
+write a query like:
+
+```bash
+jq '[ .[] | select(.antireqs | length > 0) | {course, antireqs} ]' cmpt-dependencies.json
+```
+
 
 ## Example
 
