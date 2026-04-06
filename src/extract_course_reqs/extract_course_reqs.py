@@ -83,6 +83,13 @@ def _iter_top_level(text: str) -> Generator[Segment]:
         yield Segment(text[start:], False, start, len(text))
 
 
+# TODO: This is CS specific. Evaluate whether we want to push this into
+# non-course constraints. For other consumer tasks, this simplified things
+# for now.
+def _replace_course_shorthands(text: str) -> str:
+    return text.replace("One W course", "(CMPT 105W or CMPT 376W)")
+
+
 def _strip_leading_qualifier(text: str) -> str:
     """Strip text before the first course code or '('."""
     m = re.search(rf"{_COURSE_PATTERN}|\(", text)
@@ -188,6 +195,7 @@ def _resolve_comma_and_lists(text: str) -> str:
 def _normalize(text: str) -> str:
     # Ordering matters here.
     # In particular, `one_of` -> `parenthetical_or` -> `bare_numbers`
+    text = _replace_course_shorthands(text)
     text = _strip_leading_qualifier(text)
     text = _strip_trailing_noncourse(text)
     text = _strip_comma_or(text)
