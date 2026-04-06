@@ -15,7 +15,7 @@ from bs4.element import Tag
 
 BASE = "https://www.sfu.ca"
 CALENDAR = "/students/calendar/{year}/{term}/courses/"
-PAGE = "cmpt.html"
+PAGE = "{program}.html"
 
 # Timeout for requests to the calendar web page...
 _TIMEOUT = 10
@@ -30,8 +30,8 @@ _COURSE_RE = re.compile(_COURSE_PATTERN)
 # the system easier without spamming SFU servers.
 _RAW_CACHE = Path("raw_course_info.json")
 
-_DEFAULT_GRAPH_FILE = Path("cmpt-dependencies.json")
-_DEFAULT_CALENDAR_FILE = Path("calendar.md")
+_DEFAULT_GRAPH_FILE = "{program}-dependencies.json"
+_DEFAULT_CALENDAR_FILE = "calendar.md"
 
 
 # Disjunctive Normal Form constraints for which courses students must take
@@ -348,9 +348,9 @@ def _scrape_course(title: Tag, description: Tag) -> _RawScrape | None:
     )
 
 
-def _scrape_courses(year: int, term: str) -> list[_RawScrape]:
+def _scrape_courses(program: str, year: int, term: str) -> list[_RawScrape]:
     calendar = CALENDAR.format(year=year, term=term)
-    url = BASE + calendar + PAGE
+    url = BASE + calendar + PAGE.format(program=program)
 
     # The first child of a course header should be a link to the page for the course
     def is_course_header(tag: Tag) -> bool:
@@ -486,6 +486,7 @@ class _ParsedArgs(Protocol):
     term: str
     extract_calendar: bool
     output: Path
+    program: list[str]
 
 
 def _parse_args() -> _ParsedArgs:
@@ -516,6 +517,12 @@ def _parse_args() -> _ParsedArgs:
         help="Just extract calendar data to a markdown file",
     )
 
+    parser.add_argument(
+        "--program",
+        action="append",
+        help="Which program (or programs) to extract (defaults to cmpt)",
+    )
+
     parser.add_argument("--output", type=Path, default=None, help="Output filename")
 
     args = parser.parse_args()
@@ -523,14 +530,17 @@ def _parse_args() -> _ParsedArgs:
     # All default values and relationships between arguments must be set after
     # initial parsing.
 
+    if args.year or args.term or args.extract_calendar or args.program:
+        args.force = True
+
+    if args.program is None:
+        args.program = ["cmpt"]
+
     if args.output is None:
         if args.extract_calendar:
-            args.output = _DEFAULT_CALENDAR_FILE
+            args.output = Path(_DEFAULT_CALENDAR_FILE)
         else:
-            args.output = _DEFAULT_GRAPH_FILE
-
-    if args.year is not None or args.term is not None or args.extract_calendar:
-        args.force = True
+            args.output = Path(_DEFAULT_GRAPH_FILE.format(program='-'.join(args.program)))
 
     now = datetime.datetime.now()
     if not args.year:
@@ -553,7 +563,9 @@ def main() -> None:
     args = _parse_args()
 
     if args.force or not _RAW_CACHE.exists():
-        scraped_courses = _scrape_courses(args.year, args.term)
+        # TODO: Clean up in python 3.15
+        scraped_courses = [scraped for program in args.program
+                           for scraped in _scrape_courses(program.lower(), args.year, args.term)]
 
         if args.extract_calendar:
             print("Saving markdown calendar to", args.output)

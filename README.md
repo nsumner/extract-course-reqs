@@ -50,7 +50,13 @@ have a clean working copy of the calendar:
 uv run extract-course-reqs --extract-calendar --year 2021 --output some/other/path/2021-calendar.md
 ```
 
+Different (or multiple) `--program`s can be specified. The default is CMPT,
+but extracting multiple programs at once can help with reasoning about how
+programs interact.
 
+```bash
+uv run extract-course-reqs --program cmpt --program math
+```
 
 
 ### Output Structure
