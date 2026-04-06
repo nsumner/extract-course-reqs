@@ -3,6 +3,7 @@ import datetime
 import json
 import re
 from collections import deque
+from collections.abc import Generator
 from dataclasses import asdict, dataclass, field
 from enum import StrEnum
 from pathlib import Path
@@ -50,7 +51,36 @@ class NonCourseRequirements(StrEnum):
 #############################################################################
 
 # A sequence of normalization passes remove corner cases from how the
-# Calendar entries for CMPT are written in practice.
+# Calendar entries for CMPT are written in practice. Some of the passes
+# make use of top-level parenthesized and non-parenthesized regions.
+
+
+@dataclass
+class Segment:
+    text: str
+    is_parenthesized: bool
+    start: int
+    end: int
+
+
+def _iter_top_level(text: str) -> Generator[Segment]:
+    """Yields segments of text that are either at depth 0 or fully enclosed in top-level parens."""
+    depth = 0
+    start = 0
+    for i, c in enumerate(text):
+        if c == "(":
+            if depth == 0 and i > start:
+                yield Segment(text[start:i], False, start, i)
+                start = i
+            depth += 1
+        elif c == ")":
+            depth = max(0, depth - 1)
+            if depth == 0:
+                yield Segment(text[start : i + 1], True, start, i + 1)
+                start = i + 1
+
+    if start < len(text):
+        yield Segment(text[start:], False, start, len(text))
 
 
 def _strip_leading_qualifier(text: str) -> str:
@@ -61,20 +91,14 @@ def _strip_leading_qualifier(text: str) -> str:
 
 def _strip_trailing_noncourse(text: str) -> str:
     """Truncate after the last course code or ')' seen at paren depth 0."""
-    depth = 0
     last_meaningful = 0
-
-    for i, c in enumerate(text):
-        if c == "(":
-            depth += 1
-        elif c == ")":
-            depth = max(depth - 1, 0)
-            if depth == 0:
-                last_meaningful = i + 1
-        elif depth == 0:
-            cm = _COURSE_RE.match(text, i)
-            if cm:
-                last_meaningful = cm.end()
+    for segment in _iter_top_level(text):
+        if segment.is_parenthesized:
+            last_meaningful = segment.end
+        else:
+            matches = list(_COURSE_RE.finditer(segment.text))
+            if matches:
+                last_meaningful = segment.start + matches[-1].end()
 
     return text[:last_meaningful].rstrip(", ")
 
@@ -126,6 +150,39 @@ def _expand_bare_numbers(text: str) -> str:
         _replace,
         text,
     )
+
+
+def _resolve_comma_and_lists(text: str) -> str:
+    """
+    When a depth-0 AND keyword and depth-0 commas both exist, treat the
+    comma-separated items as an AND-list. Split at depth-0 commas (consuming
+    ', and' as a single split point), wrap each segment in parens, join with
+    ' and '.
+    """
+    segments = list(_iter_top_level(text))
+
+    # No need to transform if there are no `and`s
+    if not any(not s.is_parenthesized and re.search(r"\band\b", s.text, re.I) for s in segments):
+        return text
+
+    # Tag every split point first and then remove them afterward to
+    # avoid changing the original text as much as possible.
+    parts = []
+    for s in segments:
+        if s.is_parenthesized:
+            parts.append(s.text)
+        else:
+            parts.append(re.sub(r",\s*(?:and\b)?", "||SPLIT||", s.text, flags=re.I))
+    parts = [p.strip() for p in "".join(parts).split("||SPLIT||") if p.strip()]
+
+    if len(parts) < 2:
+        return text
+
+    def _ensure_wrapped(s: str) -> str:
+        segments = list(_iter_top_level(s))
+        return s if len(segments) == 1 and segments[0].is_parenthesized else f"({s})"
+
+    return " and ".join(_ensure_wrapped(p) for p in parts)
 
 
 def _normalize(text: str) -> str:
@@ -236,79 +293,6 @@ class DNFParser:
         if not right:
             return left
         return [a + b for a in left for b in right]
-
-
-# TODO: LLM generated and loosely validated. Simplify.
-def _resolve_comma_and_lists(text: str) -> str:
-    """
-    When a depth-0 AND keyword and depth-0 commas both exist, treat the
-    comma-separated items as an AND-list. Split at depth-0 commas (consuming
-    ', and' as a single split point), wrap each segment in parens, join with
-    ' and '.
-    """
-    depth = 0
-    split_points: list[tuple[int, int]] = []  # (start, end) of separator to remove
-    has_and = False
-    i = 0
-    while i < len(text):
-        c = text[i]
-        if c == "(":
-            depth += 1
-            i += 1
-        elif c == ")":
-            depth -= 1
-            i += 1
-        elif depth == 0:
-            # ', and' Oxford comma — counts as split point AND signals AND-list
-            m = re.match(r",\s*and\b", text[i:], re.I)
-            if m:
-                split_points.append((i, i + m.end()))
-                has_and = True
-                i += m.end()
-            elif c == ",":
-                split_points.append((i, i + 1))
-                i += 1
-            else:
-                # Standalone 'and' keyword (manual word-boundary check)
-                if re.match(r"and\b", text[i:], re.I) and (i == 0 or not text[i - 1].isalnum()):
-                    has_and = True
-                i += 1
-        else:
-            i += 1
-
-    if not has_and or not split_points:
-        return text
-
-    # Split into segments at the recorded split points
-    segments: list[str] = []
-    prev = 0
-    for start, end in split_points:
-        seg = text[prev:start].strip()
-        if seg:
-            segments.append(seg)
-        prev = end
-    seg = text[prev:].strip()
-    if seg:
-        segments.append(seg)
-
-    def _wrap(s: str) -> str:
-        # Don't double-wrap segments already enclosed in balanced parens
-        if s.startswith("(") and s.endswith(")"):
-            # Verify the opening paren closes at the very end
-            d = 0
-            for idx, ch in enumerate(s):
-                if ch == "(":
-                    d += 1
-                elif ch == ")":
-                    d -= 1
-                    if d == 0 and idx < len(s) - 1:
-                        # Paren closes before the end — not a single wrapper
-                        break
-            else:
-                return s  # Single balanced wrapper — no extra parens needed
-        return f"({s})"
-
-    return " and ".join(_wrap(s) for s in segments)
 
 
 #############################################################################
