@@ -83,13 +83,6 @@ def _iter_top_level(text: str) -> Generator[Segment]:
         yield Segment(text[start:], False, start, len(text))
 
 
-# TODO: This is CS specific. Evaluate whether we want to push this into
-# non-course constraints. For other consumer tasks, this simplified things
-# for now.
-def _replace_course_shorthands(text: str) -> str:
-    return text.replace("One W course", "(CMPT 105W or CMPT 376W)")
-
-
 def _strip_leading_qualifier(text: str) -> str:
     """Strip text before the first course code or '('."""
     m = re.search(rf"{_COURSE_PATTERN}|\(", text)
@@ -110,30 +103,11 @@ def _strip_trailing_noncourse(text: str) -> str:
     return text[:last_meaningful].rstrip(", ")
 
 
-def _strip_comma_or(text: str) -> str:
-    """Collapse ', or' into ' or' to prevent double-OR tokens."""
-    return re.sub(r",\s*or\b", " or", text, flags=re.I)
-
-
-def _strip_equivalents(text: str) -> str:
-    return text.replace("or equivalent", "").replace("()", "")
-
-
-def _expand_one_of(text: str) -> str:
-    """'one of CMPT 125, 126, 128' -> '(CMPT 125 or CMPT 126 or CMPT 128)'"""
-
-    def repl(match: re.Match[str]) -> str:
-        content = match.group(1)
-        parts = re.split(r",|\bor\b", content)
-        expanded = [p.strip() for p in parts if p.strip()]
-        return "(" + " or ".join(expanded) + ")"
-
-    return re.sub(r"(?:one|any) of ([^.;]*)", repl, text, flags=re.I)
-
-
-def _expand_parenthetical_or(text: str) -> str:
-    """'MATH 152 or 155 (or 158)' -> 'MATH 152 or 155 or 158'"""
-    return re.sub(r"\(\s*or\s+([^)]+)\)", r" or \1", text, flags=re.I)
+def _replace_COMMA_or_OR_with_OR(match: re.Match[str]) -> str:
+    content = match.group(1)
+    # Note that splitting on `or` here as well makes pruning duplucates easy.
+    parts = re.split(r",|\bor\b", content)
+    return f"({' or '.join(p.strip() for p in parts if p.strip())})"
 
 
 def _expand_bare_numbers(text: str) -> str:
@@ -192,17 +166,50 @@ def _resolve_comma_and_lists(text: str) -> str:
     return " and ".join(_ensure_wrapped(p) for p in parts)
 
 
+type _PipelineStep = tuple[re.Pattern, str | Callable[[re.Match[str]], str]]
+
+
+_PRE_STRIP_REPLACEMENTS: list[_PipelineStep] = [
+    # TODO: CMPT specific. Consider non-course constraints?
+    (re.compile(r"One W course", re.I), "(CMPT 105W or CMPT 376W)"),
+]
+
+_NORMALIZING_REPLACEMENTS: list[_PipelineStep] = [
+    (re.compile(r"\(or equivalent\)|or equivalent", re.I), ""),
+
+    # Collapse ', or' into ' or' to prevent double-OR tokens.
+    (re.compile(r",\s*or\b", re.I), " or"),
+
+    # 'one of CMPT 125, 126, 128' -> '(CMPT 125 or 126 or 128)'
+    (re.compile(r"(?:one|any) of ([^.;]*)", re.I), _replace_COMMA_or_OR_with_OR),
+]
+
+_POST_LIST_REPLACEMENTS: list[_PipelineStep] = [
+    # 'MATH 152 or 155 (or 158)' -> 'MATH 152 or 155 or 158'
+    (re.compile(r"\(\s*or\s+([^)]+)\)", re.I), r" or \1"),
+]
+
+
+def _apply_pipeline(text: str, rules: list[_PipelineStep]) -> str:
+    for pattern, repl in rules:
+        text = pattern.sub(repl, text)
+    return text
+
+
 def _normalize(text: str) -> str:
     # Ordering matters here.
     # In particular, `one_of` -> `parenthetical_or` -> `bare_numbers`
-    text = _replace_course_shorthands(text)
+    text = _apply_pipeline(text, _PRE_STRIP_REPLACEMENTS)
+
     text = _strip_leading_qualifier(text)
     text = _strip_trailing_noncourse(text)
-    text = _strip_comma_or(text)
-    text = _strip_equivalents(text)
+
+    text = _apply_pipeline(text, _NORMALIZING_REPLACEMENTS)
+
     text = _resolve_comma_and_lists(text)
-    text = _expand_one_of(text)
-    text = _expand_parenthetical_or(text)
+
+    text = _apply_pipeline(text, _POST_LIST_REPLACEMENTS)
+
     text = _expand_bare_numbers(text)
     return text
 

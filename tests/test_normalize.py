@@ -1,8 +1,9 @@
 from extract_course_reqs.extract_course_reqs import (
+    _NORMALIZING_REPLACEMENTS,
+    _apply_pipeline,
     _expand_bare_numbers,
     _process_constraint,
     _resolve_comma_and_lists,
-    _strip_comma_or,
     _strip_leading_qualifier,
     _strip_trailing_noncourse,
 )
@@ -81,22 +82,24 @@ class TestStripTrailingNoncourse:
 
 class TestFixCommaOr:
     def test_collapses_comma_or(self) -> None:
-        result = _strip_comma_or("CMPT 225 and (BUS 232, STAT 201, MSE 210, or SEE 241)")
+        result = _apply_pipeline("CMPT 225 and (BUS 232, STAT 201, MSE 210, or SEE 241)",
+                                 _NORMALIZING_REPLACEMENTS)
         assert result == "CMPT 225 and (BUS 232, STAT 201, MSE 210 or SEE 241)"
 
     def test_handles_space_variants(self) -> None:
-        assert _strip_comma_or("A,or B") == "A or B"
-        assert _strip_comma_or("A, or B") == "A or B"
-        assert _strip_comma_or("A ,  or B") == "A  or B"
+        assert _apply_pipeline("A,or B", _NORMALIZING_REPLACEMENTS) == "A or B"
+        assert _apply_pipeline("A, or B", _NORMALIZING_REPLACEMENTS) == "A or B"
+        assert _apply_pipeline("A ,  or B", _NORMALIZING_REPLACEMENTS) == "A  or B"
 
     def test_no_change_without_comma_or(self) -> None:
-        result = _strip_comma_or("CMPT 225 or CMPT 275")
+        result = _apply_pipeline("CMPT 225 or CMPT 275", _NORMALIZING_REPLACEMENTS)
         assert result == "CMPT 225 or CMPT 275"
 
     def test_collapses_or_in_exceptional_cases(self) -> None:
         # "or, in exceptional cases" → the comma comes AFTER "or", not before
         # _strip_comma_or only targets ", or" (comma-then-or); this is "or," so no change
-        result = _strip_comma_or("nine units or, in exceptional cases, permission")
+        result = _apply_pipeline("nine units or, in exceptional cases, permission",
+                                 _NORMALIZING_REPLACEMENTS)
         assert result == "nine units or, in exceptional cases, permission"
 
 
