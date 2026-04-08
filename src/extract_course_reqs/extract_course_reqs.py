@@ -399,7 +399,7 @@ def _extract_course_requirements(scrape: _RawScrape) -> _RawRequirements:
 
     # 3. Extract Antirequisites (contained in one or more sentences)
     prefix = r"Students (?:with credit for|who have taken|who have obtained credit for)"
-    exclusion = r"may not (?:take|then take)"
+    exclusion = r"(?:may |can)not (?:take|then take)"
     no_dot = r"[^.]"
     anti_pattern = rf"({no_dot}*?{prefix}\s+({no_dot}*?){exclusion}{no_dot}*\.)"
     anti_matches = re.findall(anti_pattern, description, re.IGNORECASE | re.DOTALL)
